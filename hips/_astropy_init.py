@@ -112,7 +112,7 @@ if not _ASTROPY_SETUP_:  # noqa
     import os
     from warnings import warn
     from astropy.config.configuration import (
-        update_default_config,
+        #update_default_config,
         ConfigurationDefaultMissingError,
         ConfigurationDefaultMissingWarning)
 
