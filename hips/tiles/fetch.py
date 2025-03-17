@@ -89,22 +89,22 @@ def fetch_tiles(tile_metas: List[HipsTileMeta], hips_survey: HipsSurveyPropertie
     return out
 
 
-# def fetch_tile_urllib(url: str, meta: HipsTileMeta, timeout: float) -> HipsTile:
-#     """Fetch a HiPS tile asynchronously."""
-#     with urllib.request.urlopen(url, timeout=timeout) as conn:
-#         raw_data = conn.read()
-#         return HipsTile(meta, raw_data)
-
 def fetch_tile_urllib(url: str, meta: HipsTileMeta, timeout: float) -> HipsTile:
     """Fetch a HiPS tile asynchronously."""
-    from urllib.request import Request
-    from urllib.request import urlopen
-    request = Request(url)
-    request.add_header('User-Agent',
-                       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36')
-    with urlopen(request, timeout=timeout) as conn:
+    with urllib.request.urlopen(url, timeout=timeout) as conn:
         raw_data = conn.read()
         return HipsTile(meta, raw_data)
+
+# def fetch_tile_urllib(url: str, meta: HipsTileMeta, timeout: float) -> HipsTile:
+#     """Fetch a HiPS tile asynchronously."""
+#     from urllib.request import Request
+#     from urllib.request import urlopen
+#     request = Request(url)
+#     request.add_header('User-Agent',
+#                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36')
+#     with urlopen(request, timeout=timeout) as conn:
+#         raw_data = conn.read()
+#         return HipsTile(meta, raw_data)
 
 
 def tiles_urllib(tile_metas: List[HipsTileMeta], hips_survey: HipsSurveyProperties,
