@@ -1,7 +1,8 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 import asyncio
-import urllib.request
+import requests
 import concurrent.futures
+from requests.exceptions import HTTPError, Timeout
 from typing import List
 from ..tiles import HipsSurveyProperties, HipsTile, HipsTileMeta
 
@@ -16,7 +17,7 @@ __doctest_skip__ = [
 
 def fetch_tiles(tile_metas: List[HipsTileMeta], hips_survey: HipsSurveyProperties,
                 progress_bar: bool = True, n_parallel: int = 5,
-                timeout: float = 10, fetch_package: str = 'urllib') -> List[HipsTile]:
+                timeout: float = 10, fetch_package: str = 'requests') -> List[HipsTile]:
     """Fetch a list of HiPS tiles.
 
     This function fetches a list of HiPS tiles based
@@ -70,16 +71,13 @@ def fetch_tiles(tile_metas: List[HipsTileMeta], hips_survey: HipsSurveyPropertie
     """
     if fetch_package == 'aiohttp':
         fetch_fct = tiles_aiohttp
-    elif fetch_package == 'urllib':
-        fetch_fct = tiles_urllib
+    elif fetch_package in ['urllib', 'requests']:
+        fetch_fct = tiles_requests
     else:
         raise ValueError(f'Invalid package name: {fetch_package}')
 
     tiles = fetch_fct(tile_metas, hips_survey, progress_bar, n_parallel, timeout)
 
-    # Sort tiles to match the tile_meta list
-    # TODO: this doesn't seem like a great solution.
-    # Use dict instead?
     out = []
     for tile_meta in tile_metas:
         for tile in tiles:
@@ -89,80 +87,62 @@ def fetch_tiles(tile_metas: List[HipsTileMeta], hips_survey: HipsSurveyPropertie
     return out
 
 
-def fetch_tile_urllib(url: str, meta: HipsTileMeta, timeout: float) -> HipsTile:
-    """Fetch a HiPS tile asynchronously."""
-    with urllib.request.urlopen(url, timeout=timeout) as conn:
-        raw_data = conn.read()
-        return HipsTile(meta, raw_data)
+def fetch_tile_requests(url: str, meta: HipsTileMeta, timeout: float) -> HipsTile:
+    """Fetch a HiPS tile using requests with proper headers and error handling."""
+    headers = {
+        "User-Agent": "hips-fetcher/1.0",
+        "Accept": "image/fits;q=1.0, */*;q=0.1"
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        return HipsTile(meta, response.content)
+    except (HTTPError, Timeout) as e:
+        print(f"Error fetching {url}: {e}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error fetching {url}: {e}")
+        return None
 
-# def fetch_tile_urllib(url: str, meta: HipsTileMeta, timeout: float) -> HipsTile:
-#     """Fetch a HiPS tile asynchronously."""
-#     from urllib.request import Request
-#     from urllib.request import urlopen
-#     request = Request(url)
-#     request.add_header('User-Agent',
-#                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36')
-#     with urlopen(request, timeout=timeout) as conn:
-#         raw_data = conn.read()
-#         return HipsTile(meta, raw_data)
-
-
-def tiles_urllib(tile_metas: List[HipsTileMeta], hips_survey: HipsSurveyProperties,
-                 progress_bar: bool, n_parallel, timeout: float) -> List[HipsTile]:
-    """Generator function to fetch HiPS tiles from a remote URL."""
+def tiles_requests(tile_metas: List[HipsTileMeta], hips_survey: HipsSurveyProperties,
+                   progress_bar: bool, n_parallel: int, timeout: float) -> List[HipsTile]:
+    """Fetch HiPS tiles in parallel using requests."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=n_parallel) as executor:
-        futures = []
-        for meta in tile_metas:
-            url = hips_survey.tile_url(meta)
-            future = executor.submit(fetch_tile_urllib, url, meta, timeout)
-            futures.append(future)
-
-        futures = concurrent.futures.as_completed(futures)
+        futures = [executor.submit(fetch_tile_requests, hips_survey.tile_url(meta), meta, timeout) for meta in tile_metas]
         if progress_bar:
             from tqdm import tqdm
-            futures = tqdm(futures, total=len(tile_metas), desc='Fetching tiles')
-
-        tiles = []
-        for future in futures:
-            tiles.append(future.result())
-
+            futures = tqdm(concurrent.futures.as_completed(futures), total=len(tile_metas), desc='Fetching tiles')
+        tiles = [future.result() for future in futures if future.result() is not None]
     return tiles
-
 
 async def fetch_tile_aiohttp(url: str, meta: HipsTileMeta, session, timeout: float) -> HipsTile:
     """Fetch a HiPS tile asynchronously using aiohttp."""
-    async with session.get(url, timeout=timeout) as response:
-        raw_data = await response.read()
-        return HipsTile(meta, raw_data)
-
+    headers = {
+        "User-Agent": "hips-fetcher/1.0",
+        "Accept": "image/fits;q=1.0, */*;q=0.1"
+    }
+    try:
+        async with session.get(url, headers=headers, timeout=timeout) as response:
+            response.raise_for_status()
+            raw_data = await response.read()
+            return HipsTile(meta, raw_data)
+    except Exception as e:
+        print(f"Error fetching {url}: {e}")
+        return None
 
 async def fetch_all_tiles_aiohttp(tile_metas: List[HipsTileMeta], hips_survey: HipsSurveyProperties,
                                   progress_bar: bool, n_parallel: int, timeout: float) -> List[HipsTile]:
-    """Generator function to fetch HiPS tiles from a remote URL using aiohttp."""
+    """Fetch HiPS tiles using aiohttp."""
     import aiohttp
-
     connector = aiohttp.TCPConnector(limit=n_parallel)
     async with aiohttp.ClientSession(connector=connector) as session:
-        futures = []
-        for meta in tile_metas:
-            url = hips_survey.tile_url(meta)
-            future = asyncio.ensure_future(fetch_tile_aiohttp(url, meta, session, timeout))
-            futures.append(future)
-
-        futures = asyncio.as_completed(futures)
+        tasks = [fetch_tile_aiohttp(hips_survey.tile_url(meta), meta, session, timeout) for meta in tile_metas]
         if progress_bar:
-            from tqdm import tqdm
-            futures = tqdm(futures, total=len(tile_metas), desc='Fetching tiles')
-
-        tiles = []
-        for future in futures:
-            tiles.append(await future)
-
+            from tqdm.asyncio import tqdm
+            tasks = tqdm(asyncio.as_completed(tasks), total=len(tile_metas), desc='Fetching tiles')
+        tiles = [await task for task in tasks if task is not None]
     return tiles
-
 
 def tiles_aiohttp(tile_metas: List[HipsTileMeta], hips_survey: HipsSurveyProperties,
                   progress_bar: bool, n_parallel: int, timeout: float) -> List[HipsTile]:
-    return asyncio.get_event_loop().run_until_complete(
-        fetch_all_tiles_aiohttp(tile_metas, hips_survey, progress_bar, n_parallel, timeout)
-    )
+    return asyncio.run(fetch_all_tiles_aiohttp(tile_metas, hips_survey, progress_bar, n_parallel, timeout))
