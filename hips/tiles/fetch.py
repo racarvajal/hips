@@ -2,7 +2,7 @@
 import asyncio
 import requests
 import concurrent.futures
-from requests.exceptions import HTTPError, Timeout
+from requests.exceptions import HTTPError, Timeout, ConnectionError
 from typing import List
 from ..tiles import HipsSurveyProperties, HipsTile, HipsTileMeta
 
@@ -97,7 +97,7 @@ def fetch_tile_requests(url: str, meta: HipsTileMeta, timeout: float) -> HipsTil
         response = requests.get(url, headers=headers, timeout=timeout)
         response.raise_for_status()
         return HipsTile(meta, response.content)
-    except (HTTPError, Timeout) as e:
+    except (HTTPError, Timeout, ConnectionError) as e:
         print(f"Error fetching {url}: {e}")
         return None
     except Exception as e:
@@ -113,6 +113,8 @@ def tiles_requests(tile_metas: List[HipsTileMeta], hips_survey: HipsSurveyProper
             from tqdm import tqdm
             futures = tqdm(concurrent.futures.as_completed(futures), total=len(tile_metas), desc='Fetching tiles')
         tiles = [future.result() for future in futures if future.result() is not None]
+    if not tiles:
+        raise ValueError("No HiPS tiles could be fetched. Check the HiPS server URL and availability.")
     return tiles
 
 async def fetch_tile_aiohttp(url: str, meta: HipsTileMeta, session, timeout: float) -> HipsTile:
